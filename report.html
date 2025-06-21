@@ -117,11 +117,6 @@
       transition: border-color 0.3s;
     }
     
-    .form-textarea {
-      min-height: 120px;
-      resize: vertical;
-    }
-    
     .form-input:focus, .form-textarea:focus {
       outline: none;
       border-color: #000;
@@ -139,6 +134,7 @@
       cursor: pointer;
       transition: background-color 0.3s;
       width: 100%;
+      margin-bottom: 10px;
     }
     
     .form-button:hover {
@@ -148,6 +144,37 @@
     .form-button:disabled {
       background-color: #ccc;
       cursor: not-allowed;
+    }
+    
+    .location-button {
+      background-color: #000;
+      color: white;
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      cursor: pointer;
+      margin-left: 10px;
+      transition: background-color 0.3s;
+    }
+    
+    .location-button:hover {
+      background-color: #333;
+    }
+    
+    .location-button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+    
+    .coordinates-display {
+      margin-top: 10px;
+      padding: 10px;
+      background-color: #f8f9fa;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 14px;
     }
     
     .file-upload {
@@ -253,7 +280,7 @@
     <div class="header-content">
       <div class="logo-wrapper">
         <a href="index.html" title="Deutsche Botschaft Tel Aviv - Startseite">
-          <img src="/aamt-logo-dt-data.svg" alt="Logo des Auswärtigen Amts" class="logo">
+          <img src="aamt-logo-dt-data.svg" alt="Logo des Auswärtigen Amts" class="logo">
         </a>
       </div>
       
@@ -278,27 +305,42 @@
           <label for="location" class="form-label">
             Location <span class="required">*</span>
           </label>
-          <input 
-            type="text" 
-            id="location" 
-            name="location" 
-            class="form-input" 
-            placeholder="Enter the exact location or address"
-            required
-          >
+          <div style="display: flex; align-items: center;">
+            <input 
+              type="text" 
+              id="location" 
+              name="location" 
+              class="form-input" 
+              placeholder="Enter the exact location or address"
+              required
+              style="flex: 1;"
+            >
+            <button type="button" class="location-button" onclick="getCurrentLocation()">
+              Get My Location
+            </button>
+          </div>
+          <div id="coordinates-display" class="coordinates-display" style="display: none;">
+            Coordinates: <span id="coordinates-text">Not set</span>
+          </div>
         </div>
 
         <div class="form-group">
-          <label for="description" class="form-label">
-            Description <span class="required">*</span>
+          <label for="incident-type" class="form-label">
+            Incident Type <span class="required">*</span>
           </label>
-          <textarea 
-            id="description" 
-            name="description" 
-            class="form-textarea" 
-            placeholder="Please provide a brief description of the incident (what happened, when, any casualties, etc.)"
+          <select 
+            id="incident-type" 
+            name="incident-type" 
+            class="form-input" 
             required
-          ></textarea>
+          >
+            <option value="">Select incident type...</option>
+            <option value="bomb">Bomb/Explosion</option>
+            <option value="shooting">Shooting/Gunfire</option>
+            <option value="shelter">Shelter/Safe Location</option>
+            <option value="bunker">Bunker/Underground</option>
+            <option value="incident">Other Incident</option>
+          </select>
         </div>
 
         <div class="form-group">
@@ -342,6 +384,13 @@
   </footer>
 
   <script>
+    // Initialize local storage
+    if (!localStorage.getItem('incidents')) {
+      localStorage.setItem('incidents', JSON.stringify([]));
+    }
+
+    let currentCoordinates = null;
+
     function previewImage(input) {
       const preview = document.getElementById('file-preview');
       const file = input.files[0];
@@ -366,21 +415,177 @@
       }, 5000);
     }
 
+    function getCurrentLocation() {
+      const button = document.querySelector('.location-button');
+      const coordinatesDisplay = document.getElementById('coordinates-display');
+      const coordinatesText = document.getElementById('coordinates-text');
+      
+      if (!navigator.geolocation) {
+        showAlert('Geolocation is not supported by this browser.', 'error');
+        return;
+      }
+      
+      button.disabled = true;
+      button.textContent = 'Getting Location...';
+      
+      navigator.geolocation.getCurrentPosition(
+        function(position) {
+          const lat = position.coords.latitude;
+          const lon = position.coords.longitude;
+          
+          currentCoordinates = { lat, lon };
+          coordinatesText.textContent = `${lat.toFixed(1)}, ${lon.toFixed(1)}`;
+          coordinatesDisplay.style.display = 'block';
+          
+          // Reverse geocode to get address
+          fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`)
+            .then(response => response.json())
+            .then(data => {
+              if (data.display_name) {
+                document.getElementById('location').value = data.display_name;
+              }
+            })
+            .catch(error => {
+              console.log('Could not get address from coordinates');
+            });
+          
+          showAlert('Location obtained successfully!', 'success');
+        },
+        function(error) {
+          let errorMessage = 'Unable to retrieve your location.';
+          switch(error.code) {
+            case error.PERMISSION_DENIED:
+              errorMessage = 'Location access denied. Please allow location access and try again.';
+              break;
+            case error.POSITION_UNAVAILABLE:
+              errorMessage = 'Location information unavailable.';
+              break;
+            case error.TIMEOUT:
+              errorMessage = 'Location request timed out.';
+              break;
+          }
+          showAlert(errorMessage, 'error');
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 300000
+        }
+      );
+      
+      button.disabled = false;
+      button.textContent = 'Get My Location';
+    }
+
+    function getCoordinatesFromLocation(location) {
+      // If we have current coordinates from GPS, use them
+      if (currentCoordinates) {
+        return currentCoordinates;
+      }
+      
+      // Fallback to predefined locations
+      const locationMap = {
+        'tel aviv': { lat: 32.0853, lon: 34.7818 },
+        'jerusalem': { lat: 31.7683, lon: 35.2137 },
+        'haifa': { lat: 32.7940, lon: 34.9896 },
+        'beer sheva': { lat: 31.2518, lon: 34.7913 },
+        'ashdod': { lat: 31.8044, lon: 34.6500 },
+        'netanya': { lat: 32.3328, lon: 34.8600 },
+        'petah tikva': { lat: 32.0871, lon: 34.8875 },
+        'rishon lezion': { lat: 31.9686, lon: 34.7983 },
+        'holon': { lat: 32.0167, lon: 34.7792 },
+        'bnei brak': { lat: 32.0807, lon: 34.8338 }
+      };
+      
+      const locationLower = location.toLowerCase();
+      for (const [key, coords] of Object.entries(locationMap)) {
+        if (locationLower.includes(key)) {
+          return coords;
+        }
+      }
+      
+      return { lat: 32.0853, lon: 34.7818 }; // Default to Tel Aviv
+    }
+
     document.getElementById('incident-form').addEventListener('submit', function(e) {
       e.preventDefault();
       
       const submitBtn = document.getElementById('submit-btn');
+      const form = document.getElementById('incident-form');
+      
       submitBtn.disabled = true;
       submitBtn.textContent = 'Submitting...';
       
-      // Simulate form submission
-      setTimeout(() => {
-        showAlert('Report submitted successfully! Emergency services have been notified.', 'success');
-        document.getElementById('incident-form').reset();
+      try {
+        const formData = new FormData(form);
+        const location = formData.get('location').trim();
+        const incidentType = formData.get('incident-type').trim();
+        const contact = formData.get('contact').trim();
+        
+        if (!location || !incidentType) {
+          showAlert('Location and incident type are required', 'error');
+          return;
+        }
+        
+        // Get coordinates
+        const coords = getCoordinatesFromLocation(location);
+        const incidentName = location.split(',')[0].trim();
+        
+        // Create incident object
+        const incident = {
+          type: incidentType,
+          lat: coords.lat,
+          lon: coords.lon,
+          name: incidentName,
+          contact: contact,
+          timestamp: new Date().toISOString()
+        };
+        
+        // Save to local storage
+        const incidents = JSON.parse(localStorage.getItem('incidents') || '[]');
+        incidents.push(incident);
+        localStorage.setItem('incidents', JSON.stringify(incidents));
+        
+        // Send to server to save to CSV
+        fetch('http://localhost:3001/submit-incident', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: incident.type,
+            lat: incident.lat,
+            lon: incident.lon,
+            name: incident.name
+          })
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            showAlert('Report submitted successfully! Data saved to data.csv', 'success');
+          } else {
+            showAlert('Error: ' + data.error, 'error');
+          }
+        })
+        .catch(error => {
+          console.error('Error sending to server:', error);
+          showAlert('Report saved locally but failed to save to CSV. Please check if server is running.', 'error');
+        });
+        
+        form.reset();
         document.getElementById('file-preview').innerHTML = '';
+        document.getElementById('coordinates-display').style.display = 'none';
+        currentCoordinates = null;
+        
+        console.log('Incident reported:', incident);
+        
+      } catch (error) {
+        console.error('Error submitting form:', error);
+        showAlert('Error submitting report. Please try again.', 'error');
+      } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = 'Submit Emergency Report';
-      }, 2000);
+      }
     });
 
     // Drag and drop functionality
